@@ -170,14 +170,6 @@ def mwstats(x, y):
         index=["U_statistic", "log2_fold_change", "standard_error", "n", "p"],
     )
 
-def kwstats(*args):
-    stats = kruskal(*args)
-
-    return pd.Series(
-        [stats[0], stats[1]],
-        index=["H_statistic", "p"],
-    )
-
 def mwtests(
     table,
     taxa,
@@ -233,114 +225,16 @@ def mwtests(
     return results
 
 
-# def kwtests(res, column): 
-#     results = pd.DataFrame()
-#     for key in res.groups.keys():
-#         df = res.get_group(key) 
-#         count = len(df)
-#         regions = df[column].unique() 
-        
-#         if len(regions) == 1:
-#             continue
-#         if len(regions)==2:
-#             stats = kwstats(
-#             df[df[column] == df[column].unique()[0]].clr,
-#             df[df[column] == df[column].unique()[1]].clr)
-#         elif len(regions)==3:
-#             stats = kwstats(
-#             df[df[column] == df[column].unique()[0]].clr,
-#             df[df[column] == df[column].unique()[1]].clr,
-#             df[df[column] == df[column].unique()[2]].clr)        
-#         elif len(regions)==4:
-#             stats = kwstats(
-#             df[df[column] == df[column].unique()[0]].clr,
-#             df[df[column] == df[column].unique()[1]].clr,
-#             df[df[column] == df[column].unique()[2]].clr,
-#             df[df[column] == df[column].unique()[3]].clr)
-#         elif len(regions)==5:
-#             stats = kwstats(
-#             df[df[column] == df[column].unique()[0]].clr,
-#             df[df[column] == df[column].unique()[1]].clr,
-#             df[df[column] == df[column].unique()[2]].clr,
-#             df[df[column] == df[column].unique()[3]].clr,
-#             df[df[column] == df[column].unique()[4]].clr)
-#         elif len(regions)==6:
-#             stats = kwstats(
-#             df[df[column] == df[column].unique()[0]].clr,
-#             df[df[column] == df[column].unique()[1]].clr,
-#             df[df[column] == df[column].unique()[2]].clr,
-#             df[df[column] == df[column].unique()[3]].clr,
-#             df[df[column] == df[column].unique()[4]].clr,
-#             df[df[column] == df[column].unique()[5]].clr)
-#         results = pd.concat([results, pd.DataFrame({'taxon' : [key[5]], 'H-stat':stats['H_statistic'],'n':count,'p':stats['p']})])
-#     results['q'] = fdrcorrection(results['p'])[1]
-#     return results
+def clr_transform_individual(row):
+    row = row + 0.5
+    geometric_mean = np.exp(np.mean(np.log(row)))
+    clr_values = np.log(row / geometric_mean)
+    return clr_values
 
-def kwtests(res, column):
-    results = pd.DataFrame()
-    for key, df in res:
-        regions = df[column].unique()
-        
-        if len(regions) == 1:
-            continue
-        
-        stats_args = [df[df[column] == region].clr for region in regions]
-        stats = kwstats(*stats_args)
-        
-        results = pd.concat([results,pd.DataFrame({
-            'taxon': [key[5]],
-            'H-stat': [stats['H_statistic']],
-            'n': [len(df)], 
-            'p': [stats['p']]})])
-
-    results['q'] = fdrcorrection(results['p'])[1]
-    return results
-
-
-
-def enrichment_plot(arg, all_tests, rank):
-    colors = {'Significant, Enriched in Cases':'firebrick', 'Significant, Enriched in Controls':'cadetblue','Not Significant':'gray'}
-    df = all_tests[all_tests['condition'].str.contains(arg)].reset_index(drop = True)
-    df = assign_significance(df, rank)
-    if len(df) == 0:
-        print('No Significant Hits')
-        return
-    df = df.sort_values(by = ['significance','log2_fold_change'],ascending=[False,True]).reset_index(drop = True)
-    x_scale = df[rank].unique()                                                                                       
-    plt = (ggplot(
-            df,aes(x = rank, y = 'log2_fold_change',shape = 'URT Area',color = 'significance'))
-           +geom_point(aes(size = 'n'))
-           +geom_hline(yintercept = 0)
-           +geom_segment(aes(xend=rank), yend=0)
-           +scale_x_discrete(limits=x_scale)
-           +scale_color_manual(values = colors)
-           +labs(title = arg, y = 'Enriched in Controls                         Enriched in Cases')
-           +coord_flip())+theme_minimal()+theme(figure_size=(12,8),text=element_text(size=18))
-    return plt
-
-
-def assign_significance(df,rank):
-    """ Assign significance to results of Mann-Whitney """
-    df['significance'] = np.nan
-    df = df.dropna(subset = ['q'])
-    df.loc[df['q'] > 0.0, 'significance'] = 'Not Significant'
-    df.loc[(df['q'] < 0.1)&(df['log2_fold_change'] >0), 'significance'] = 'Significant, Enriched in Cases'
-    df.loc[(df['q'] < 0.1)&(df['log2_fold_change'] <0), 'significance'] = 'Significant, Enriched in Controls'
-    df = df[df[rank].isin(df[df['significance'].str.startswith('Significant')][rank].unique())].sort_values(
-        by = 'log2_fold_change').reset_index()  #filter df to remove taxa that are not significant in any study
-    return df 
-
-
-
-def significance_test(sig_hits, all_tests, arg, rank):
-    all_tests = assign_significance(all_tests, rank)
-    df = all_tests[(all_tests['condition'].str.contains(arg))&
-                     (~all_tests['significance'].str.contains('Not Significant'))]
-    df = pd.DataFrame(df.groupby(rank)['significance'].value_counts()).rename(
-        columns = {'significance':'count'}).reset_index()
-    df.loc[df['significance'].str.contains('Controls'), ['count']] = df.loc[
-        df['significance'].str.contains('Controls'), ['count']]*-1
-    df['condition'] = arg
-    sig_hits = pd.concat([sig_hits,df])
-    return sig_hits
-
+def effectsize(group1, group2):
+    mean1, mean2 = np.mean(group1), np.mean(group2)
+    std1, std2 = np.std(group1), np.std(group2)
+    
+    pooled_std = np.sqrt(((len(group1) - 1) * std1**2 + (len(group2) - 1) * std2**2) / (len(group1) + len(group2) - 2))
+    cohens_d = (mean1 - mean2) / pooled_std
+    return cohens_d
